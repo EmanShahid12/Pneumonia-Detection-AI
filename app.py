@@ -1,137 +1,47 @@
-# ==========================================
-# STEP 1: SETUP KAGGLE & DOWNLOAD DATA
-# ==========================================
-import os
-
-# Set your Kaggle API details (Using your active token)
-os.environ['KAGGLE_USERNAME'] = "emanshahid"
-os.environ['KAGGLE_KEY'] = "KGAT_1ffa0be4a0e7ca68b29a5fe9ffdba3fc"
-
-# Download the Pneumonia Dataset from Kaggle
-print("Step 1: Downloading dataset...")
-!kaggle datasets download -d paultimothymooney/chest-xray-pneumonia
-
-# Unzip the downloaded files into a folder named 'dataset'
-print("Step 2: Extracting files...")
-!unzip -q chest-xray-pneumonia.zip -d /content/dataset/
-print("Data is ready!")
-
-# ==========================================
-# STEP 2: PREPARE DATA (DATA AUGMENTATION)
-# ==========================================
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
-# Paths to the folders
-train_dir = '/content/dataset/chest_xray/train'
-test_dir = '/content/dataset/chest_xray/test'
-val_dir = '/content/dataset/chest_xray/val'
-
-# Rescale images (Divide by 255) to make values between 0 and 1
-# Also add 'zoom' and 'flip' to help the model learn better (Augmentation)
-train_datagen = ImageDataGenerator(rescale=1./255, shear_range=0.2, zoom_range=0.2, horizontal_flip=True)
-test_datagen = ImageDataGenerator(rescale=1./255)
-
-# Load images from folders in batches of 32
-train_generator = train_datagen.flow_from_directory(train_dir, target_size=(150, 150), batch_size=32, class_mode='binary')
-test_generator = test_datagen.flow_from_directory(test_dir, target_size=(150, 150), batch_size=32, class_mode='binary')
-val_generator = test_datagen.flow_from_directory(val_dir, target_size=(150, 150), batch_size=32, class_mode='binary')
-
-# ==========================================
-# STEP 3: CREATE THE CNN MODEL (THE BRAIN)
-# ==========================================
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
-
-model = Sequential()
-
-# Layer 1: Find simple patterns (edges, lines)
-model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(150, 150, 3)))
-model.add(MaxPooling2D(2, 2)) # Shrink image size
-
-# Layer 2: Find more complex patterns
-model.add(Conv2D(64, (3, 3), activation='relu'))
-model.add(MaxPooling2D(2, 2))
-
-# Layer 3: Deep features
-model.add(Conv2D(128, (3, 3), activation='relu'))
-model.add(MaxPooling2D(2, 2))
-
-# Flatten: Convert 2D image data into 1D list
-model.add(Flatten())
-
-# Dense Layer: Final decision making
-model.add(Dense(128, activation='relu'))
-model.add(Dropout(0.5)) # Prevent the model from memorizing (Overfitting)
-model.add(Dense(1, activation='sigmoid')) # Output: 0 (Normal) or 1 (Pneumonia)
-
-# Compile: Set the rules for learning
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-model.summary()
-
-# ==========================================
-# STEP 4: TRAIN THE MODEL
-# ==========================================
-print("Step 3: Starting Training...")
-history = model.fit(train_generator, epochs=10, validation_data=val_generator)
-
-# ==========================================
-# STEP 5: VISUALIZE RESULTS (GRAPHS)
-# ==========================================
-import matplotlib.pyplot as plt
-
-# Create Accuracy and Loss plots
-plt.figure(figsize=(12, 4))
-
-# Plot Accuracy
-plt.subplot(1, 2, 1)
-plt.plot(history.history['accuracy'], label='Train Acc')
-plt.plot(history.history['val_accuracy'], label='Val Acc')
-plt.title('Model Accuracy')
-plt.legend()
-
-# Plot Loss
-plt.subplot(1, 2, 2)
-plt.plot(history.history['loss'], label='Train Loss')
-plt.plot(history.history['val_loss'], label='Val Loss')
-plt.title('Model Loss')
-plt.legend()
-plt.show()
-
-# ==========================================
-# STEP 6: PREDICTION & PROMPT ENGINEERING
-# ==========================================
-from google.colab import files
-from tensorflow.keras.preprocessing import image
+import streamlit as st
+import tensorflow as tf
+from PIL import Image
 import numpy as np
 
-# Upload an image to test
-uploaded = files.upload()
+# 1. Page Title
+st.title("🏥 AI Pneumonia Detector")
+st.write("Upload a Chest X-ray image to get an AI prediction.")
 
-for filename in uploaded.keys():
-    # Load and process the image
-    img = image.load_img(filename, target_size=(150, 150))
-    img_array = image.img_to_array(img) / 255.0
+# 2. Load the trained model (Make sure 'pneumonia_model.h5' is in your GitHub)
+@st.cache_resource
+def load_my_model():
+    # Only load the model, don't try to download datasets here
+    return tf.keras.models.load_model('pneumonia_model.h5')
+
+try:
+    model = load_my_model()
+except Exception as e:
+    st.error("Model file not found! Please make sure 'pneumonia_model.h5' is uploaded to GitHub.")
+
+# 3. Image Upload Utility
+uploaded_file = st.file_uploader("Choose an X-ray image...", type=["jpg", "jpeg", "png"])
+
+if uploaded_file is not None:
+    # Display the uploaded image
+    image = Image.open(uploaded_file)
+    st.image(image, caption='Uploaded X-ray', use_column_width=True)
+    
+    # 4. Preprocessing (Match the training size: 150x150)
+    img = image.resize((150, 150))
+    img_array = np.array(img.convert('RGB')) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
-
-    # Get Prediction
-    pred = model.predict(img_array)
-    status = "PNEUMONIA" if pred[0][0] > 0.5 else "NORMAL"
-    confidence = pred[0][0] if status == "PNEUMONIA" else 1 - pred[0][0]
-
-    # PROMPT ENGINEERING: Generating a Human-Readable Report
-    prompt_report = f"""
-    --- AI SCREENING REPORT ---
-    The CNN Model analyzed the X-ray image.
-    RESULT: {status}
-    CONFIDENCE SCORE: {confidence*100:.2f}%
-
-    ADVICE:
-    1. If confidence is below 80%, please double-check with a Senior Doctor.
-    2. Maintain hydration and monitor breathing patterns.
-    3. DISCLAIMER: This is an AI-generated result and not a final medical diagnosis.
-    """
-    print(prompt_report)
-
-# Save the model for Deployment later
-model.save('pneumonia_model.h5')
-print("Model saved as pneumonia_model.h5")
+    
+    # 5. Prediction Logic
+    prediction = model.predict(img_array)
+    result = "PNEUMONIA" if prediction[0][0] > 0.5 else "NORMAL"
+    confidence = prediction[0][0] if result == "PNEUMONIA" else 1 - prediction[0][0]
+    
+    # 6. Show Results
+    st.subheader(f"Detection Result: {result}")
+    st.write(f"Confidence Level: {confidence*100:.2f}%")
+    
+    # Simple advice based on result
+    if result == "PNEUMONIA":
+        st.warning("AI detects patterns of Pneumonia. Please consult a doctor.")
+    else:
+        st.success("The X-ray appears Normal.")
