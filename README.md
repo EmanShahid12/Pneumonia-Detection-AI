@@ -37,4 +37,6 @@ pneumonia_model.h5: The pre-trained weights of the CNN model.
 requirements.txt: List of necessary Python libraries for deployment.
 
  Disclaimer
+
 This tool is for educational and screening purposes only. It is not a substitute for professional medical diagnosis. Always consult a qualified healthcare provider.
+https://drive.google.com/file/d/128vMTkE6K2mNvNrat-xdjO9YIwTVgxe8/view?usp=drive_link
